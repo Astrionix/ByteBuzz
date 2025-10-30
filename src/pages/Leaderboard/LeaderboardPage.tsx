@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import styles from './LeaderboardPage.module.css'
 import { feedbackDishes } from '../../data/feedbackDishes'
 import { useFeedbackStore } from '../../store/useFeedbackStore'
@@ -7,6 +7,18 @@ const MAX_STARS = 5
 
 function LeaderboardPage() {
   const ratings = useFeedbackStore((state) => state.ratings)
+  const fetchLeaderboard = useFeedbackStore((state) => state.fetchLeaderboard)
+  const startLeaderboardStream = useFeedbackStore((state) => state.startLeaderboardStream)
+  const stopLeaderboardStream = useFeedbackStore((state) => state.stopLeaderboardStream)
+
+  useEffect(() => {
+    fetchLeaderboard().catch(() => {})
+    startLeaderboardStream()
+
+    return () => {
+      stopLeaderboardStream()
+    }
+  }, [fetchLeaderboard, startLeaderboardStream, stopLeaderboardStream])
 
   const leaderboard = useMemo(() => {
     return feedbackDishes

@@ -37,6 +37,14 @@
   opacity: 0;
 }
 
+.cardImage {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 244, 229, 0.18);
+}
+
 .cardBody h2 {
   margin: 0;
   font-size: 1.5rem;

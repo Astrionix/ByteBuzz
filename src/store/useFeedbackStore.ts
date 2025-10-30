@@ -1,4 +1,6 @@
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { create } from 'zustand'
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
 
 export type FeedbackRatings = Record<string, number>
 
@@ -8,6 +10,13 @@ type LeaderboardEntry = {
   ratingCount: number
 }
 
+type FeedbackRow = {
+  dish_id: string
+  rating: number
+  user_id?: string
+  created_at?: string
+}
+
 type FeedbackState = {
   ratings: FeedbackRatings
   loading: boolean
@@ -15,10 +24,10 @@ type FeedbackState = {
   fetchLeaderboard: () => Promise<void>
   submitRating: (dishId: string, value: number, userId?: string) => Promise<void>
   startLeaderboardStream: () => void
+  stopLeaderboardStream: () => void
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:8080'
-const REQUEST_TIMEOUT_MS = Number.parseInt(import.meta.env.VITE_API_TIMEOUT_MS ?? '4000', 10)
+const FEEDBACK_TABLE = 'feedback_votes'
 
 const mockLeaderboard: FeedbackRatings = {
   'cucumber-boats': 4,
@@ -27,14 +36,56 @@ const mockLeaderboard: FeedbackRatings = {
   'bhel-poori': 4,
 }
 
-const fetchWithTimeout = async (input: RequestInfo | URL, init?: RequestInit) => {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  try {
-    return await fetch(input, { ...init, signal: controller.signal })
-  } finally {
-    clearTimeout(timeout)
+const aggregateRatings = (rows: FeedbackRow[]): FeedbackRatings => {
+  if (!rows.length) {
+    return {}
   }
+
+  const totals = new Map<string, { sum: number; count: number }>()
+
+  for (const row of rows) {
+    if (!row.dish_id) continue
+    if (!totals.has(row.dish_id)) {
+      totals.set(row.dish_id, { sum: 0, count: 0 })
+    }
+    const record = totals.get(row.dish_id)!
+    record.sum += row.rating
+    record.count += 1
+  }
+
+  const ratings: FeedbackRatings = {}
+  totals.forEach((value, key) => {
+    if (value.count === 0) return
+    const average = value.sum / value.count
+    ratings[key] = Math.max(0, Math.min(5, Math.round(average)))
+  })
+  return ratings
+}
+
+let leaderboardChannel: RealtimeChannel | null = null
+let channelSubscribers = 0
+
+const ensureLeaderboardChannel = (fetch: () => Promise<void>) => {
+  if (!isSupabaseConfigured || leaderboardChannel) {
+    return
+  }
+
+  leaderboardChannel = supabase
+    .channel('feedback-leaderboard')
+    .on('postgres_changes', { event: '*', schema: 'public', table: FEEDBACK_TABLE }, () => {
+      fetch().catch(() => {})
+    })
+    .subscribe()
+}
+
+const teardownLeaderboardChannel = async () => {
+  if (!leaderboardChannel) {
+    return
+  }
+  try {
+    await supabase.removeChannel(leaderboardChannel)
+  } catch {}
+  leaderboardChannel = null
 }
 
 export const useFeedbackStore = create<FeedbackState>((set, get) => ({
@@ -42,58 +93,64 @@ export const useFeedbackStore = create<FeedbackState>((set, get) => ({
   loading: false,
   error: null,
   fetchLeaderboard: async () => {
+    if (!isSupabaseConfigured) {
+      set({ ratings: mockLeaderboard, loading: false, error: 'Supabase is not configured. Using mock leaderboard.' })
+      return
+    }
+
     set({ loading: true, error: null })
     try {
-      const response = await fetchWithTimeout(`${API_BASE}/leaderboard`)
-      if (!response.ok) {
-        throw new Error(`Failed to load leaderboard (${response.status})`)
+      const { data, error } = await supabase.from(FEEDBACK_TABLE).select('dish_id, rating')
+      if (error) {
+        throw error
       }
-      const json: { leaderboard: LeaderboardEntry[] } = await response.json()
-      const ratings = json.leaderboard.reduce<FeedbackRatings>((acc, entry) => {
-        acc[entry.id] = Math.round(entry.averageRating)
-        return acc
-      }, {})
+      const rows = (data ?? []) as FeedbackRow[]
+      const ratings = aggregateRatings(rows)
       set({ ratings, loading: false })
     } catch (error) {
       set({ ratings: mockLeaderboard, loading: false, error: error instanceof Error ? error.message : 'Unable to reach rating service' })
     }
   },
   startLeaderboardStream: () => {
-    try {
-      const source = new EventSource(`${API_BASE}/leaderboard/stream`)
-      source.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as { leaderboard?: LeaderboardEntry[] }
-          const rows = data.leaderboard ?? []
-          const ratings = rows.reduce<FeedbackRatings>((acc, entry) => {
-            acc[entry.id] = Math.round(entry.averageRating)
-            return acc
-          }, {})
-          set({ ratings })
-        } catch {}
-      }
-      source.onerror = () => {
-        try { source.close() } catch {}
-      }
-    } catch {}
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    channelSubscribers += 1
+
+    if (!isSupabaseConfigured) {
+      return
+    }
+
+    ensureLeaderboardChannel(get().fetchLeaderboard)
+  },
+  stopLeaderboardStream: () => {
+    if (channelSubscribers > 0) {
+      channelSubscribers -= 1
+    }
+
+    if (channelSubscribers === 0) {
+      void teardownLeaderboardChannel()
+    }
   },
   submitRating: async (dishId, value, userId) => {
     const state = get()
     const previous = state.ratings[dishId]
     const optimistic = {
       ...state.ratings,
-      [dishId]: previous === value ? 0 : value,
+      [dishId]: value,
     }
     set({ ratings: optimistic })
 
+    if (!isSupabaseConfigured) {
+      set({ error: 'Supabase is not configured. Rating stored locally only.' })
+      return
+    }
+
     try {
-      const response = await fetchWithTimeout(`${API_BASE}/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dishId, rating: value, userId }),
-      })
-      if (!response.ok) {
-        throw new Error(`Failed to submit feedback (${response.status})`)
+      const { error } = await supabase.from(FEEDBACK_TABLE).insert({ dish_id: dishId, rating: value, user_id: userId })
+      if (error) {
+        throw error
       }
       await get().fetchLeaderboard()
     } catch (error) {

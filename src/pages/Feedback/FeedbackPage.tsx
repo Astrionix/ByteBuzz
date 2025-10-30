@@ -11,6 +11,7 @@ function FeedbackPage() {
   const error = useFeedbackStore((state) => state.error)
   const fetchLeaderboard = useFeedbackStore((state) => state.fetchLeaderboard)
   const startLeaderboardStream = useFeedbackStore((state) => state.startLeaderboardStream)
+  const stopLeaderboardStream = useFeedbackStore((state) => state.stopLeaderboardStream)
   const submitRating = useFeedbackStore((state) => state.submitRating)
   const [focusedDish, setFocusedDish] = useState<string | null>(null)
 
@@ -19,7 +20,11 @@ function FeedbackPage() {
   useEffect(() => {
     fetchLeaderboard().catch(() => {})
     startLeaderboardStream()
-  }, [fetchLeaderboard])
+
+    return () => {
+      stopLeaderboardStream()
+    }
+  }, [fetchLeaderboard, startLeaderboardStream, stopLeaderboardStream])
 
   const handleRate = (dishId: string, value: number) => {
     submitRating(dishId, value).catch(() => {})
@@ -47,6 +52,7 @@ function FeedbackPage() {
               className={`${styles.card} ${focusedDish === dish.id ? styles.cardActive : ''}`.trim()}
               style={{ animationDelay: `${index * 0.08}s` }}
             >
+              <img className={styles.cardImage} src={dish.imageUrl} alt={dish.name} loading="lazy" />
               <div className={styles.cardBody}>
                 <h2>{dish.name}</h2>
                 <p>{dish.description}</p>

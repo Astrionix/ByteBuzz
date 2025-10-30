@@ -11,6 +11,7 @@
   "dependencies": {
     "@firebase/app": "^0.14.4",
     "@firebase/firestore": "^4.9.2",
+    "@supabase/supabase-js": "^2.45.2",
     "firebase": "^12.4.0",
     "framer-motion": "^12.23.24",
     "react": "^18.2.0",

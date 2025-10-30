@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import styles from './MenuPage.module.css'
 import { useDailyMenu } from '../../hooks/useDailyMenu'
+import { feedbackDishes } from '../../data/feedbackDishes'
 
 type DishCategory = 'veg' | 'non-veg' | 'drink'
 
@@ -44,6 +45,15 @@ type BuildOption = {
 const filters = [
   { id: 'all', label: 'All' },
 ]
+
+const imageByDishId = feedbackDishes.reduce<Record<string, string>>((acc, dish) => {
+  acc[dish.id] = dish.imageUrl
+  return acc
+}, {})
+
+if (!imageByDishId['bitebuzz-mocktail'] && imageByDishId.mocktail) {
+  imageByDishId['bitebuzz-mocktail'] = imageByDishId.mocktail
+}
 
 const knowMoreContent: Record<string, DishKnowMore> = {
   'cucumber-boats': {
@@ -142,6 +152,7 @@ const fallbackDishes: DishCard[] = [
     trivia: 'A refreshing snack with low calories — hydrating and perfect for sunny events!',
     calories: 120,
     available: true,
+    image: imageByDishId['cucumber-boats'],
     knowMore: knowMoreContent['cucumber-boats'],
     cookTimeMinutes: 10,
   },
@@ -154,6 +165,7 @@ const fallbackDishes: DishCard[] = [
     trivia: 'Nachos were first served accidentally — now reimagined with a healthy, data-driven twist.',
     calories: 250,
     available: true,
+    image: imageByDishId['nachos-salad'],
     knowMore: knowMoreContent['nachos-salad'],
     cookTimeMinutes: 15,
   },
@@ -166,6 +178,7 @@ const fallbackDishes: DishCard[] = [
     trivia: 'AI generated the flavor ratio to optimize sweetness, acidity, and refreshment!',
     calories: 90,
     available: true,
+    image: imageByDishId.mocktail,
     knowMore: knowMoreContent.mocktail,
     cookTimeMinutes: 5,
   },
@@ -178,6 +191,7 @@ const fallbackDishes: DishCard[] = [
     trivia: 'A street food legend turned smart snack — now served with digital flair!',
     calories: 200,
     available: true,
+    image: imageByDishId['bhel-poori'],
     knowMore: knowMoreContent['bhel-poori'],
     cookTimeMinutes: 12,
   },
@@ -200,7 +214,7 @@ function MenuPage() {
       description: dish.description ?? 'Chef is still typing up the tasting notes…',
       trivia: dish.trivia ?? 'Ask the Food Genie for the latest gossip on this dish.',
       available: dish.available !== false,
-      image: dish.image,
+      image: dish.image ?? imageByDishId[dish.id],
       knowMore: knowMoreContent[dish.id],
       cookTimeMinutes: (dish as { cookTimeMinutes?: number }).cookTimeMinutes,
     })) satisfies DishCard[]
